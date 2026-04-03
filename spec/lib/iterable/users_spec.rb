@@ -129,6 +129,28 @@ RSpec.describe Iterable::Users, :vcr do
         expect(res.body['code']).to match(/InvalidEmailAddressError/i)
       end
     end
+
+    context 'with user_id instead of email' do
+      let(:res) { subject.update_subscriptions nil, 'userId' => '1' }
+
+      it 'responds with success' do
+        expect(res).to be_success
+      end
+
+      it 'responds with response object' do
+        expect(res).to be_a(Iterable::Response)
+      end
+
+      it 'returns success code' do
+        expect(res.body['code']).to match(/success/i)
+      end
+    end
+
+    context 'without email or user_id' do
+      it 'raises an ArgumentError' do
+        expect { subject.update_subscriptions nil }.to raise_error(ArgumentError, 'email or userId is required')
+      end
+    end
   end
 
   describe 'bulk_update_subscriptions' do

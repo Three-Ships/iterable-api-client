@@ -76,9 +76,11 @@ module Iterable
     # @param attrs [Hash] Additional data to update
     #
     # @return [Iterable::Response] A response object
+    #
+    # @note An email or userId is required
     sig do
       params(
-        email: String,
+        email: T.nilable(String),
         attrs: T::Hash[
           T.any(Symbol, String),
           T.any(T::Boolean, String, Integer, Float)
@@ -86,7 +88,11 @@ module Iterable
       ).returns(Iterable::Response)
     end
     def update_subscriptions(email, attrs = {})
-      attrs['email'] = email
+      user_id = attrs.delete('userId') || attrs.delete(:userId)
+      raise ArgumentError, 'email or userId is required' unless email || user_id
+
+      attrs['email'] = email if email
+      attrs['userId'] = user_id if user_id
       Iterable.request(conf, '/users/updateSubscriptions').post(attrs)
     end
 
