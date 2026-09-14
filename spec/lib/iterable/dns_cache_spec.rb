@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 
-RSpec.describe Iterable::DnsCache do
+RSpec.describe Iterable::DnsCache, :dns_cache do
   let(:hostname) { 'api.iterable.test' }
   let(:port) { 443 }
 

@@ -96,21 +96,82 @@ RSpec.describe Iterable::Request do
 
   describe 'connect failures' do
     let(:net_http_class) { Net::HTTP::Get }
-    let(:refreshed_net_http) { instance_double(Net::HTTP) }
+    let(:retried_net_http) { instance_double(Net::HTTP) }
 
-    it 'invalidates and re-resolves the cached IP once' do
-      allow(Net::HTTP).to receive(:new).and_return(test_net_http, refreshed_net_http)
+    before do
+      allow(Net::HTTP).to receive(:new).and_return(test_net_http, retried_net_http)
       allow(Iterable::DnsCache).to receive(:fetch).and_return('192.0.2.1', '192.0.2.2')
+      allow(Iterable::DnsCache).to receive(:invalidate)
       allow(test_net_http).to receive(:start).and_raise(Net::OpenTimeout)
-      allow(refreshed_net_http).to receive(:ipaddr=)
-      allow(refreshed_net_http).to receive(:start).and_return(refreshed_net_http)
-      expect(Iterable::DnsCache).to receive(:invalidate).with('api.iterable.com')
+      allow(retried_net_http).to receive(:ipaddr=)
+      allow(retried_net_http).to receive(:started?).and_return(false)
+    end
+
+    it 'retries the next cached IP without invalidating' do
+      allow(retried_net_http).to receive(:start).and_return(retried_net_http)
 
       request.send(:open_connection)
 
+      expect(Iterable::DnsCache).not_to have_received(:invalidate)
       expect(Iterable::DnsCache).to have_received(:fetch).with('api.iterable.com', 443, config.dns_cache_ttl).twice
-      expect(refreshed_net_http).to have_received(:ipaddr=).with('192.0.2.2')
+      expect(retried_net_http).to have_received(:ipaddr=).with('192.0.2.2')
+    end
+
+    it 'invalidates after the cached retry also fails' do
+      allow(retried_net_http).to receive(:start).and_raise(Errno::ECONNREFUSED)
+
+      expect { request.send(:open_connection) }.to raise_error(Errno::ECONNREFUSED)
+
+      expect(Iterable::DnsCache).to have_received(:invalidate).with('api.iterable.com', 443).once
+      expect(Iterable::DnsCache).to have_received(:fetch).twice
     end
   end
 
+  describe 'DNS resolution failures' do
+    let(:net_http_class) { Net::HTTP::Get }
+
+    def resolution_error(code)
+      Socket::ResolutionError.new('getaddrinfo failure').tap do |error|
+        allow(error).to receive(:error_code).and_return(code)
+      end
+    end
+
+    before do
+      allow(Kernel).to receive(:sleep)
+    end
+
+    it 'retries EAI_AGAIN up to the configured count and then re-raises' do
+      config.dns_retry_count = 2
+      allow(Iterable::DnsCache).to receive(:fetch).and_raise(resolution_error(Socket::EAI_AGAIN))
+
+      expect { request.get }.to raise_error(Socket::ResolutionError)
+      expect(Iterable::DnsCache).to have_received(:fetch).exactly(3).times
+      expect(Kernel).to have_received(:sleep).twice
+    end
+
+    it 'does not retry EAI_NONAME, which is an authoritative answer' do
+      allow(Iterable::DnsCache).to receive(:fetch).and_raise(resolution_error(Socket::EAI_NONAME))
+
+      expect { request.get }.to raise_error(Socket::ResolutionError)
+      expect(Iterable::DnsCache).to have_received(:fetch).once
+      expect(Kernel).not_to have_received(:sleep)
+    end
+
+    it 'retries errors that carry no error_code' do
+      config.dns_retry_count = 1
+      allow(Iterable::DnsCache).to receive(:fetch).and_raise(resolution_error(nil))
+
+      expect { request.get }.to raise_error(Socket::ResolutionError)
+      expect(Iterable::DnsCache).to have_received(:fetch).twice
+    end
+
+    it 'does not retry non-DNS SocketErrors' do
+      error = SocketError.new('connection failed')
+      allow(Iterable::DnsCache).to receive(:fetch).and_raise(error)
+
+      expect { request.get }.to raise_error(error)
+      expect(Iterable::DnsCache).to have_received(:fetch).once
+      expect(Kernel).not_to have_received(:sleep)
+    end
+  end
 end

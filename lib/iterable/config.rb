@@ -16,7 +16,7 @@ module Iterable
     DEFAULT_PORT = 443
     # Seconds to retain resolved A records before re-querying DNS.
     DEFAULT_DNS_CACHE_TTL = 60
-    # Extra attempts after Socket::ResolutionError or Errno::EAI_AGAIN.
+    # Extra attempts after a retryable Socket::ResolutionError (EAI_AGAIN).
     DEFAULT_DNS_RETRY_COUNT = 3
 
     attr_accessor :token
