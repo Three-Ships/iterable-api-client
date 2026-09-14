@@ -14,10 +14,19 @@ module Iterable
       verify_mode: OpenSSL::SSL::VERIFY_PEER
     }.freeze
 
+    CONNECT_FAILURES = [
+      Net::OpenTimeout,
+      Errno::ECONNREFUSED,
+      Errno::ETIMEDOUT,
+      Errno::EHOSTUNREACH,
+      Errno::ENETUNREACH
+    ].freeze
+
     DEFAULT_HEADERS = {
       'accept' => 'application/json',
       'content-type' => 'application/json'
     }.freeze
+
 
     sig do
       params(
@@ -99,16 +108,29 @@ module Iterable
     end
 
     private def net_http
-      Net::HTTP.new(@uri.hostname, @uri.port, nil, nil, nil, nil)
+      http = Net::HTTP.new(@uri.hostname, @uri.port, nil, nil, nil, nil)
+      http.ipaddr = DnsCache.fetch(@uri.hostname, @uri.port, @config.dns_cache_ttl)
+      http
     end
 
     sig { params(req: Net::HTTPRequest).returns(Iterable::Response) }
     private def transmit(req)
-      response = nil
-      @net.start do |http|
-        response = http.request(req, nil, &:read_body)
-      end
+      open_connection
+      response = @net.request(req, nil, &:read_body)
       handle_response response
+    ensure
+      @net.finish if @net.started?
+    end
+
+    private def open_connection(refreshed = false)
+      @net.start
+    rescue *CONNECT_FAILURES
+      raise if refreshed
+
+      DnsCache.invalidate(@uri.hostname)
+      @net = net_http
+      setup_http(@net)
+      open_connection(true)
     end
 
     sig { params(response: Net::HTTPResponse).returns(Iterable::Response) }

@@ -16,8 +16,11 @@ RSpec.describe Iterable::Request do
 
   before do
     allow(Net::HTTP).to receive(:new).and_return(test_net_http)
+    allow(Iterable::DnsCache).to receive(:fetch).and_return('192.0.2.1')
     allow(net_http_class).to receive(:new).and_return(test_request)
-    allow(test_net_http).to receive(:start).and_yield(test_net_http)
+    allow(test_net_http).to receive(:ipaddr=)
+    allow(test_net_http).to receive(:start).and_return(test_net_http)
+    allow(test_net_http).to receive(:started?).and_return(false)
     allow(test_request).to receive(:body=)
     allow(test_net_http).to receive(:request).and_return(test_net_resp)
     allow(test_net_resp).to receive(:code)
@@ -30,8 +33,10 @@ RSpec.describe Iterable::Request do
 
     before { request.get }
 
-    it 'calls http request correctly', :aggregate_failures do
-      expect(Net::HTTP).to have_received(:new).with(config.uri.hostname, config.uri.port, nil, nil, nil, nil)
+    it 'uses the resolved IP while preserving the hostname for TLS', :aggregate_failures do
+      expect(Net::HTTP).to have_received(:new).with('api.iterable.com', 443, nil, nil, nil, nil)
+      expect(Iterable::DnsCache).to have_received(:fetch).with('api.iterable.com', 443, config.dns_cache_ttl)
+      expect(test_net_http).to have_received(:ipaddr=).with('192.0.2.1')
       expect(net_http_class).to have_received(:new).with(test_uri, request_headers)
       expect(test_net_http).to have_received(:request).with(test_request, nil, &:read_body)
     end
@@ -88,4 +93,24 @@ RSpec.describe Iterable::Request do
       expect(test_net_http).to have_received(:request).with(test_request, nil, &:read_body)
     end
   end
+
+  describe 'connect failures' do
+    let(:net_http_class) { Net::HTTP::Get }
+    let(:refreshed_net_http) { instance_double(Net::HTTP) }
+
+    it 'invalidates and re-resolves the cached IP once' do
+      allow(Net::HTTP).to receive(:new).and_return(test_net_http, refreshed_net_http)
+      allow(Iterable::DnsCache).to receive(:fetch).and_return('192.0.2.1', '192.0.2.2')
+      allow(test_net_http).to receive(:start).and_raise(Net::OpenTimeout)
+      allow(refreshed_net_http).to receive(:ipaddr=)
+      allow(refreshed_net_http).to receive(:start).and_return(refreshed_net_http)
+      expect(Iterable::DnsCache).to receive(:invalidate).with('api.iterable.com')
+
+      request.send(:open_connection)
+
+      expect(Iterable::DnsCache).to have_received(:fetch).with('api.iterable.com', 443, config.dns_cache_ttl).twice
+      expect(refreshed_net_http).to have_received(:ipaddr=).with('192.0.2.2')
+    end
+  end
+
 end
