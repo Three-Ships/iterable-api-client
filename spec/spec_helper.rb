@@ -35,7 +35,8 @@ RSpec.configure do |config|
   config.warnings = true
   config.profile_examples = 10
 
-  config.before do
+  config.before do |example|
+    allow(Iterable::DnsCache).to receive(:fetch).and_return('127.0.0.1') unless example.metadata[:dns_cache]
     Iterable.configure do |conf|
       conf.token = ENV.fetch('ITERABLE_TOKEN', nil)
     end

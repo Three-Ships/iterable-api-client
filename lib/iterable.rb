@@ -15,6 +15,7 @@ files = %w[
   catalog_items
   config
   response
+  dns_cache
   request
   lists
   campaigns
