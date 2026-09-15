@@ -3,6 +3,9 @@ source 'https://rubygems.org'
 gemspec
 
 group :development, :test do
+  gem 'base64'
+  gem 'bigdecimal'
+  gem 'csv'
   gem 'dotenv',               '~> 2.7.1'
   gem 'gemcutter',            '~> 0.7.1'
   gem 'pry',                  '~> 0.14.1'
