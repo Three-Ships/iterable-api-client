@@ -7,7 +7,8 @@ module Iterable
   #
   # Resolves with a trailing-dot FQDN so Kubernetes ndots:5 does not emit
   # extra search-domain queries. Entries are keyed by hostname and port,
-  # expire after the caller-supplied TTL, and rotate round-robin.
+  # expire after the caller-supplied TTL, and rotate round-robin from a
+  # randomly seeded offset.
   # Concurrent misses for the same key singleflight on a ConditionVariable.
   # {invalidate} drops an entry so the next fetch re-resolves (e.g. after a
   # TCP connect failure).
@@ -39,7 +40,11 @@ module Iterable
         mutex.synchronize do
           entry[:addresses] = addresses
           entry[:expires_at] = monotonic_time + ttl
-          entry[:index] = 0
+          # Seeded rather than zeroed so replicas resolving the same host do
+          # not all open their first connection to addresses[0]. Zeroing made
+          # a dead first address a guaranteed hit at the start of every TTL
+          # window for every process, instead of a one-in-N chance.
+          entry[:index] = rand(addresses.length)
           entry[:resolving] = false
           entry[:condition].broadcast
           next_address(entry)

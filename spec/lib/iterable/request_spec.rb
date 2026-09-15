@@ -19,6 +19,7 @@ RSpec.describe Iterable::Request do
     allow(Iterable::DnsCache).to receive(:fetch).and_return('192.0.2.1')
     allow(net_http_class).to receive(:new).and_return(test_request)
     allow(test_net_http).to receive(:ipaddr=)
+    allow(test_net_http).to receive(:open_timeout=)
     allow(test_net_http).to receive(:start).and_return(test_net_http)
     allow(test_net_http).to receive(:started?).and_return(false)
     allow(test_request).to receive(:body=)
@@ -39,6 +40,10 @@ RSpec.describe Iterable::Request do
       expect(test_net_http).to have_received(:ipaddr=).with('192.0.2.1')
       expect(net_http_class).to have_received(:new).with(test_uri, request_headers)
       expect(test_net_http).to have_received(:request).with(test_request, nil, &:read_body)
+    end
+
+    it 'bounds the connect with the configured open timeout' do
+      expect(test_net_http).to have_received(:open_timeout=).with(config.open_timeout)
     end
   end
 
@@ -104,6 +109,7 @@ RSpec.describe Iterable::Request do
       allow(Iterable::DnsCache).to receive(:invalidate)
       allow(test_net_http).to receive(:start).and_raise(Net::OpenTimeout)
       allow(retried_net_http).to receive(:ipaddr=)
+      allow(retried_net_http).to receive(:open_timeout=)
       allow(retried_net_http).to receive(:started?).and_return(false)
     end
 

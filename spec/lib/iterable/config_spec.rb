@@ -37,6 +37,16 @@ RSpec.describe Iterable::Config do
       expect(conf.dns_retry_count).to eql(5)
     end
 
+    it 'defaults the connection open timeout' do
+      expect(conf.open_timeout).to eql(described_class::DEFAULT_OPEN_TIMEOUT)
+    end
+
+    it 'allows the connection open timeout to be overridden' do
+      conf.open_timeout = 2
+
+      expect(conf.open_timeout).to be(2)
+    end
+
     context 'with a token' do
       it 'sets the token' do
         expect(conf.port).to eql(described_class::DEFAULT_PORT)

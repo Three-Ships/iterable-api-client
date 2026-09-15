@@ -125,6 +125,9 @@ module Iterable
 
     private def net_http
       http = Net::HTTP.new(@uri.hostname, @uri.port, nil, nil, nil, nil)
+      # Bounds CONNECT_FAILURES. read_timeout is deliberately left at the
+      # Net::HTTP default because Iterable's bulk endpoints run long.
+      http.open_timeout = @config.open_timeout
       http.ipaddr = DnsCache.fetch(@uri.hostname, @uri.port, @config.dns_cache_ttl)
       http
     end

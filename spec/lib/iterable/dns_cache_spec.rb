@@ -32,11 +32,21 @@ RSpec.describe Iterable::DnsCache, :dns_cache do
   end
 
   it 'rotates cached addresses' do
+    allow(described_class).to receive(:rand).and_return(0)
     allow(Addrinfo).to receive(:getaddrinfo).and_return([address('192.0.2.3'), address('192.0.2.4')])
 
     addresses = 3.times.map { described_class.fetch('round-robin.iterable.test', port, 60) }
 
     expect(addresses).to eql(%w[192.0.2.3 192.0.2.4 192.0.2.3])
+  end
+
+  it 'seeds the rotation offset so replicas do not share a first address' do
+    allow(described_class).to receive(:rand).with(2).and_return(1)
+    allow(Addrinfo).to receive(:getaddrinfo).and_return([address('192.0.2.3'), address('192.0.2.4')])
+
+    addresses = Array.new(2) { described_class.fetch('seeded.iterable.test', port, 60) }
+
+    expect(addresses).to eql(%w[192.0.2.4 192.0.2.3])
   end
 
   it 'resolves again after invalidation' do
