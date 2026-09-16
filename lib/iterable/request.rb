@@ -14,32 +14,6 @@ module Iterable
       verify_mode: OpenSSL::SSL::VERIFY_PEER
     }.freeze
 
-    CONNECT_FAILURES = [
-      Net::OpenTimeout,
-      Errno::ECONNREFUSED,
-      Errno::ETIMEDOUT,
-      Errno::EHOSTUNREACH,
-      Errno::ENETUNREACH
-    ].freeze
-
-    # Extra connect attempts using the next cached address (round-robin)
-    # before dropping the entry. Avoids a CoreDNS round-trip that can
-    # return the same ordered set and the same dead IP.
-    CONNECT_CACHE_RETRIES = 1
-
-    # getaddrinfo codes retried in {#with_dns_retries}. EAI_AGAIN is what
-    # libc reports when a resolver query times out or its UDP packet is
-    # dropped, which is the failure this cache exists to absorb. EAI_NONAME
-    # and EAI_NODATA are authoritative answers; retrying them only delays a
-    # failure that will not resolve itself.
-    DNS_RETRYABLE_CODES = [Socket::EAI_AGAIN].freeze
-
-    # Max sleep (seconds) before a DNS retry. Flat jitter only: libc has
-    # already spent its own timeout budget by the time EAI_AGAIN surfaces,
-    # and dropped packets clear on the next attempt rather than needing
-    # progressive backoff.
-    DNS_RETRY_JITTER_MAX = 0.1
-
     DEFAULT_HEADERS = {
       'accept' => 'application/json',
       'content-type' => 'application/json'
@@ -55,7 +29,8 @@ module Iterable
     def initialize(config, path, params = {})
       @config = config
       @uri = build_uri(path, params)
-      @net = nil
+      @net = net_http
+      setup_http(@net)
     end
 
     sig { params(headers: Hash).returns(Iterable::Response) }
@@ -124,72 +99,16 @@ module Iterable
     end
 
     private def net_http
-      http = Net::HTTP.new(@uri.hostname, @uri.port, nil, nil, nil, nil)
-      # Bounds CONNECT_FAILURES. read_timeout is deliberately left at the
-      # Net::HTTP default because Iterable's bulk endpoints run long.
-      http.open_timeout = @config.open_timeout
-      http.ipaddr = DnsCache.fetch(@uri.hostname, @uri.port, @config.dns_cache_ttl)
-      http
+      Net::HTTP.new(@uri.hostname, @uri.port, nil, nil, nil, nil)
     end
 
     sig { params(req: Net::HTTPRequest).returns(Iterable::Response) }
     private def transmit(req)
-      with_dns_retries do
-        open_connection
-        handle_response @net.request(req, nil, &:read_body)
+      response = nil
+      @net.start do |http|
+        response = http.request(req, nil, &:read_body)
+        handle_response response
       end
-    end
-
-    private def with_dns_retries
-      attempts = 0
-      begin
-        yield
-      rescue Socket::ResolutionError => e
-        raise unless retryable_resolution_error?(e)
-        raise if attempts >= @config.dns_retry_count
-
-        attempts += 1
-        reset_connection
-        Kernel.sleep(rand * DNS_RETRY_JITTER_MAX)
-        retry
-      ensure
-        close_connection
-      end
-    end
-
-    # Errors raised by libc always carry an error_code. Anything constructed
-    # elsewhere does not, and is retried rather than silently swallowed.
-    private def retryable_resolution_error?(error)
-      code = error.error_code
-      code.nil? || DNS_RETRYABLE_CODES.include?(code)
-    end
-
-    private def open_connection
-      attempts = 0
-      begin
-        @net ||= configured_net_http
-        @net.start
-      rescue *CONNECT_FAILURES
-        reset_connection
-        attempts += 1
-        retry if attempts <= CONNECT_CACHE_RETRIES
-
-        DnsCache.invalidate(@uri.hostname, @uri.port)
-        raise
-      end
-    end
-
-    private def reset_connection
-      close_connection
-      @net = nil
-    end
-
-    private def configured_net_http
-      net_http.tap { |http| setup_http(http) }
-    end
-
-    private def close_connection
-      @net.finish if @net && @net.started?
     end
 
     sig { params(response: Net::HTTPResponse).returns(Iterable::Response) }
